@@ -1,0 +1,43 @@
+.venv
+Test/
+pyproject.toml
+test.json
+uv.lock
+extra.txt
+
+# -----------------------------
+# Python project ignores
+# -----------------------------
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Distribution / packaging
+build/
+dist/
+
+
+# IDE / Editor configs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test folder & local data
+Test/
+test.json
+
+# Lock file (uv or pip)
+uv.lock
+
+# Optional: ignore pyproject.toml only if you don’t want to commit config
+pyproject.toml
