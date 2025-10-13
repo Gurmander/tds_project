@@ -1,7 +1,18 @@
 from fastapi import FastAPI, Response, status
-from helper import *
+from fastapi.middleware.cors import CORSMiddleware
+from helper import verify_secret, handle_query
 
 app = FastAPI()
+
+
+# --- Enable CORS for all origins ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],          # Allow all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],          # Allow all headers
+)
 
 
 # health check
