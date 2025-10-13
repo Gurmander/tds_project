@@ -33,16 +33,23 @@ def handle_task(data: dict):
         )
     
     else:
-        # process the task
-        handle_query(data)
 
-        # OK response
-        return Response(
-            content='{"Data": "Received"}',
-            media_type="application/json",
-            status_code=status.HTTP_200_OK
-        )        
+        try:
+            # process the task
+            handle_query(data)
 
+            # OK response
+            return Response(
+                content='{"Data": "Received"}',
+                media_type="application/json",
+                status_code=status.HTTP_200_OK
+            )        
+        except Exception as e:
+            return Response(
+                content=f'{{"error": "{str(e)}"}}',  # Convert exception to string
+                media_type="application/json",
+                status_code=500,  # Use = not :
+            )
 
 
 
