@@ -4,6 +4,7 @@ pyproject.toml
 test.json
 uv.lock
 extra.txt
+.env
 
 # -----------------------------
 # Python project ignores
