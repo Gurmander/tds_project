@@ -19,8 +19,36 @@ def verify_secret(test):
     return test == secret_key
 
 
-def create_github_repo(repo_name: str):
+def check_repo_exists(repo_name: str) -> bool:
+    """Check if a GitHub repository exists"""
+    headers = {
+        "Authorization": f"Bearer {gh_token}",
+        "Accept": "application/vnd.github+json"
+    }
+    
+    response = requests.get(
+        f"https://api.github.com/repos/{gh_user}/{repo_name}",
+        headers=headers
+    )
+    
+    return response.status_code == 200
+
+
+
+
+def create_github_repo(repo_name: str, force_recreate: bool):
     # create repo w/ given repo name
+
+    # Check if repo exists and delete if force_recreate is True
+    if force_recreate and check_repo_exists(repo_name):
+        print(f"🔄 Repo '{repo_name}' already exists. Deleting...")
+        delete_github_repo(repo_name)
+        
+        # Wait a moment for GitHub to process the deletion
+        time.sleep(2)
+        print("⏳ Waiting for deletion to complete...")
+
+
     payload = {
         "name": repo_name,
         "private": False,
@@ -39,10 +67,29 @@ def create_github_repo(repo_name: str):
         json=payload
     )
 
-    if response.status_code != 201:
-        raise Exception(f"Failed to create repo: {response.status_code}: {response.text}")
+    if response.status_code == 201:
+        print(f"✅ Successfully created repo: {repo_name}")
+        return response.json()
+    elif response.status_code == 422:
+        # Repo still exists (deletion might not have completed)
+        print(f"⚠️ Repo still exists. Retrying deletion...")
+        delete_github_repo(repo_name)
+        time.sleep(3)
+        
+        # Retry creation
+        response = requests.post(
+            "https://api.github.com/user/repos",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 201:
+            print(f"✅ Successfully created repo on retry: {repo_name}")
+            return response.json()
+        else:
+            raise Exception(f"Failed to create repo after retry: {response.status_code}: {response.text}")
     else:
-        return response.text
+        raise Exception(f"Failed to create repo: {response.status_code}: {response.text}")
 
 
 def enable_github_pages_0(repo_name: str):
@@ -283,7 +330,7 @@ def handle_query(data):
                     "name": filename,
                     "content": content
                 })
-            create_github_repo(repo_name)
+            create_github_repo(repo_name, True)
             pages_url = enable_github_pages(repo_name)
             latest_sha = push_files_to_repo(repo_name, files, 1)
             obj = {
