@@ -479,10 +479,188 @@ def get_current_repo_files(repo_name: str) -> dict:
     return get_files_recursive()
 
 
+def write_code_with_llm(task_data: dict) -> dict:
+    """
+    Use LLM to generate code based on task requirements
+    Returns dict with files and their contents
+    """
+    
+    # Extract task information
+    task_id = task_data.get('task', 'unknown-task')
+    brief = task_data.get('brief', '')
+    checks = task_data.get('checks', [])
+    attachments = task_data.get('attachments', [])
+    
+    # Format checks
+    checks_formatted = "\n".join([f"{i+1}. {check}" for i, check in enumerate(checks)])
+    
+    # Format attachments info
+    attachments_info = ""
+    if attachments:
+        attachments_info = "ATTACHMENTS PROVIDED:\n"
+        for att in attachments:
+            name = att.get('name', 'file')
+            url_preview = att.get('url', '')[:80] + '...' if len(att.get('url', '')) > 80 else att.get('url', '')
+            attachments_info += f"- {name}: {url_preview}\n"
+    
+    # OPTIMIZED PROMPT - Clear, concise, forces JSON output
+    prompt = f"""Generate a complete, working web application for GitHub Pages deployment.
+
+TASK: {task_id}
+DESCRIPTION: {brief}
+
+REQUIREMENTS (ALL must be met):
+{checks_formatted}
+
+{attachments_info}
+
+DEPLOYMENT CONSTRAINTS:
+• Static site only (GitHub Pages) - NO backend servers
+• index.html must be at root directory
+• Use client-side JavaScript only (vanilla JS or CDN libraries)
+• No Node.js, no API endpoints, no server-side code
+• All processing happens in the browser
+
+SECURITY:
+• NO API keys, secrets, or tokens in code
+• Use environment variables if needed (document in README)
+
+FILE REQUIREMENTS:
+1. index.html - Complete working app at root (not in subfolder)
+2. Additional .js/.css files if needed (or use inline/CDN)
+3. README.md - Professional, with:
+   - Project summary
+   - How to use (open index.html or GitHub Pages URL)
+   - How to pass URL parameters (?url=...)
+   - MIT License included
+4. .gitignore - Basic ignore file
+
+CODE QUALITY:
+• Write COMPLETE, FUNCTIONAL code (no TODOs or placeholders)
+• Keep code concise (under 200 lines per file)
+• Use short variable names (i, el, btn, img, etc.)
+• Minimal comments (only where essential)
+• Handle errors gracefully
+
+URL PARAMETERS:
+If the task requires reading URLs from query params:
+const url = new URLSearchParams(window.location.search).get('url') || 'default-or-sample-url';
+
+ATTACHMENTS:
+If attachments are provided, embed them as:
+• Default sample data (base64 data URI)
+• OR load from ?url=... parameter when provided
+
+OUTPUT FORMAT (CRITICAL - PURE JSON ONLY):
+Return ONLY this JSON structure with no markdown, no code blocks, no explanations:
+
+{{
+  "files": {{
+    "index.html": "<!DOCTYPE html>\\n<html lang=\\"en\\">\\n<head>...</head>\\n<body>...</body>\\n</html>",
+    "README.md": "# Project Title\\n\\n## Summary\\n...\\n## License\\nMIT License...",
+    ".gitignore": "node_modules/\\n.env\\n.DS_Store",
+    "style.css": "body {{ margin: 0; }}",
+    "script.js": "// JavaScript code"
+  }},
+  "main_language": "javascript",
+  "description": "Brief one-line description"
+}}
+
+EXAMPLE MINIMAL index.html:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{task_id}</title>
+  <style>/* CSS here */</style>
+</head>
+<body>
+  <h1>App Title</h1>
+  <div id="app"><!-- Content --></div>
+  <script>
+    // All JavaScript here or link external file
+  </script>
+</body>
+</html>
+
+Generate the complete application now (JSON only):"""
+
+    try:
+        print(f"📝 Prompt length: {len(prompt)} characters")
+        
+        # Call LLM API
+        print("🤖 Calling LLM...")
+        response_text = call_aipipe_llm(prompt=prompt)
+        
+        print(f"📊 Response length: {len(response_text)} characters")
+        print(f"📋 Response preview (first 100): {response_text[:100]}")
+        print(f"📋 Response preview (last 100): {response_text[-100:]}")
+        
+        # Parse JSON from response
+        print("🔍 Extracting JSON...")
+        code_structure = extract_json_from_response(response_text)
+        
+        # Validate structure
+        if not isinstance(code_structure, dict):
+            raise ValueError("LLM response is not a dictionary")
+        
+        if "files" not in code_structure:
+            raise ValueError("LLM response missing 'files' key")
+        
+        if not isinstance(code_structure["files"], dict):
+            raise ValueError("'files' is not a dictionary")
+        
+        if not code_structure["files"]:
+            raise ValueError("'files' dictionary is empty")
+        
+        # Ensure index.html exists
+        if "index.html" not in code_structure["files"]:
+            raise ValueError("Missing required 'index.html' file")
+        
+        # Ensure README.md exists and has MIT license
+        if "README.md" not in code_structure["files"]:
+            code_structure["files"]["README.md"] = generate_default_readme(task_id, brief)
+        else:
+            readme = code_structure["files"]["README.md"]
+            if "MIT License" not in readme and "MIT" not in readme:
+                readme += "\n\n## License\n\nMIT License\n\nCopyright (c) 2025\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software..."
+                code_structure["files"]["README.md"] = readme
+        
+        # Ensure .gitignore exists
+        if ".gitignore" not in code_structure["files"]:
+            code_structure["files"][".gitignore"] = get_default_gitignore()
+        
+        # Log success
+        print(f"✅ Code generated successfully!")
+        print(f"   Files created: {len(code_structure['files'])}")
+        for filename, content in code_structure["files"].items():
+            print(f"   - {filename}: {len(content)} characters")
+        
+        return code_structure
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON parsing failed: {e}")
+        print(f"   Response length: {len(response_text)}")
+        print(f"   First 200 chars: {response_text[:200]}")
+        print(f"   Last 200 chars: {response_text[-200:]}")
+        
+        # Save problematic response
+        with open('failed_llm_response.txt', 'w', encoding='utf-8') as f:
+            f.write(response_text)
+        print("💾 Saved full response to 'failed_llm_response.txt'")
+        
+        raise Exception(f"Error parsing LLM JSON response: {str(e)}")
+        
+    except Exception as e:
+        print(f"❌ Error generating code: {e}")
+        raise Exception(f"Error generating code with LLM: {str(e)}")
+
+
 
 
 # GENERATE LLM CODE
-def write_code_with_llm(task_data: dict) -> dict:
+def write_code_with_llm_0(task_data: dict) -> dict:
     """
     Use Claude to generate code based on task requirements
     Returns dict with files and their contents
