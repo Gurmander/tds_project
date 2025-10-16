@@ -319,7 +319,7 @@ def get_sha_of_latest_commit(repo_name: str, branch: str = "main") -> str:
 
 def handle_query(data):
 
-    repo_name = f"{data['task']}_{data['nonce']}"
+    repo_name = f"{data['task'].replace(' ', '-')}-{data['nonce']}"
     try:
         if data.get('round') ==1:
             # test_api_connection()
@@ -1227,7 +1227,7 @@ def hit_evaluation_url(evaluation_url, eval_obj):
 
 def handle_round_2(data):
     """Handle round 2 - update existing repo based on feedback"""
-    repo_name = f"{data['task']}_{data['nonce']}"
+    repo_name = f"{data['task'].replace(' ', '-')}-{data['nonce']}"
     
     try:
         print(f"🔄 Starting Round 2 for {repo_name}")
