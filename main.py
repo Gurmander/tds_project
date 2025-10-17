@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from helper import verify_secret, handle_query
+from help import verify_secret, handle_query
 
 app = FastAPI()
 
@@ -16,7 +16,7 @@ app.add_middleware(
 
 
 # health check
-@app.get("/health")
+@app.get("/")
 def health_check():
     return {"Status": "Running"}
 
