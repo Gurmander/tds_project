@@ -390,21 +390,12 @@ credentials/
 """
 
 
-# sha required if want to update file, in round 2
-def get_sha_of_latest_commit(repo_name: str, branch: str = "main") -> str:
-    response = requests.get(f"https://api.github.com/repos/{gh_user}/{repo_name}/commits/{branch}")
-    if response.status_code != 200:
-        raise Exception("Failed to get latest commit sha: {response.status_code}, {response.text}")
-    return response.json().get("sha")
-
-
-
 
 # -------------------- GIT REPO STUFF --------------------------- #
 
 
 # -------------------------- LLM --------------------------- 
-def call_aipipe_llm(messages: list=[], model: str = "gpt-4o-mini") -> str:
+def call_aipipe_llm(prompt: str, model: str = "gpt-4o-mini") -> str:
     
     url = "https://aipipe.org/openrouter/v1/chat/completions"
     
@@ -415,7 +406,12 @@ def call_aipipe_llm(messages: list=[], model: str = "gpt-4o-mini") -> str:
     
     payload = {
         "model": model,
-        "messages": messages,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
         "temperature": 0.3,
         "max_tokens": 8000
     }
@@ -437,7 +433,7 @@ def call_aipipe_llm(messages: list=[], model: str = "gpt-4o-mini") -> str:
 
 
 
-def write_code_with_llm(task_data: dict) -> dict:
+def write_code_with_llm(task_data: dict, attachments: list = []) -> dict:
     
     print("🧠 Calling API to create round 1 code...")
     # Extract task information
@@ -448,11 +444,13 @@ def write_code_with_llm(task_data: dict) -> dict:
     # Format checks
     checks_formatted = "\n".join([f"{i+1}. {check}" for i, check in enumerate(checks)])
     
-    system_prompt = f" You are a highly skilled web developer specializing in full-stack development. Your objective is to create a complete single-page web application according to the specifications provided. "
-    prompt = f""" 
+    
+    prompt = f"""
+    You are a highly skilled web developer specializing in full-stack development. Your objective is to create a complete single-page web application according to the specifications provided below.
     You must create a standalone index.html file containing all required HTML markup, CSS styling, and JavaScript functionality.
     If external libraries such as Bootstrap, jQuery etc. are required, incorporate them using CDN (Content Delivery Network) links.
-    The code you produce must be accurate, functional, and ready for immediate use without modifications. If any error, handle them gracefully.      
+    The code you produce must be accurate, functional, and ready for immediate use without modifications. If any error, handle them gracefully.   
+    
 
     TASK: {task_id}
     DESCRIPTION: {brief}
@@ -460,12 +458,37 @@ def write_code_with_llm(task_data: dict) -> dict:
     REQUIREMENTS (ALL must be met):
     {checks_formatted}
 
-    ATTACHMENTS:
-        - If any attachment of type image_url is provided, include it in the generated HTML using its exact image_url value as:
-        <img src="data:image/..."> 
-        Add appropriate styling (responsive layout, borders, etc.) as needed to fit the design.
-        - Do NOT alter, truncate, or replace the image URL.
-        - For non-image attachments, process them according to the provided handling rules.
+
+    ATTACHED FILES:
+    {attachments}
+
+    ⚠️ CRITICAL FILE HANDLING RULES:
+
+    FOR SMALL CSV/TEXT/JSON FILES:
+    - The full content is shown directly in the ATTACHED FILES section.
+    - Use this *exact content* as your data source.
+    - DO NOT fabricate, replace, or simulate missing parts.
+
+    FOR LARGE CSV/TEXT/JSON FILES:
+    - Large files are split into multiple chunks labeled as:
+    [CHUNK 1/5 - filename.ext] ... [END OF CHUNK 1]
+    - Process chunks **sequentially** and treat them as a single continuous file.
+    - You may summarize, analyze, or extract relevant information from these chunks as needed.
+    - DO NOT skip or assume missing content unless clearly truncated.
+
+    FOR IMAGE FILES:
+    - Image data is NOT embedded due to size constraints.
+    - The file metadata (type, name, size) is provided for context.
+    - If image content is required, assume only general properties (e.g., type, purpose, name) unless text description is given.
+
+    FOR BINARY FILES (PDF, ZIP, etc.):
+    - Binary files are too large to embed directly.
+    - Only metadata is shown (filename, size, and type).
+    - You may summarize what the file represents but cannot read its binary content directly.
+
+
+    - NEVER try to embed large base64 strings directly in the HTML
+    - Add proper error handling for file loading failures
 
 
     FILE REQUIREMENTS:
@@ -515,19 +538,12 @@ def write_code_with_llm(task_data: dict) -> dict:
     </html>
     """
 
-
-    content = build_multimodal_messages(prompt, task_data.get('attachments'))
-
     try:
         print(f"📝 Prompt length: {len(prompt)} characters")
         
         # Call LLM API
         print("🤖 Calling LLM...")
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": system_prompt} ]},
-            content
-        ]
-        response_text = call_aipipe_llm(messages)
+        response_text = call_aipipe_llm(prompt=prompt)
         
         # Parse JSON from response
         print("🔍 Extracting JSON...")
@@ -575,7 +591,7 @@ def write_code_with_llm(task_data: dict) -> dict:
 
 
 
-def write_code_update_with_llm(task_data: dict, current_files: dict) -> dict:
+def write_code_update_with_llm(task_data: dict, current_files: dict, attachments: list=[]) -> dict:
 
     print("🧠 Calling API for round 2 ...")
     task_id = task_data.get('task', 'unknown-task')
@@ -591,20 +607,17 @@ def write_code_update_with_llm(task_data: dict, current_files: dict) -> dict:
     
     current_files_str = "\n\n".join(current_files_formatted)
     
-    system_prompt = f"""
-    You are an expert full-stack developer updating an existing code based on new briefs.
-    Do not add any comments, just provide final, complete, updated code. Make sure code is ready for production deployment, handle errors gracefully.
-    """
 
  
     prompt = f"""
-    
+    You are an expert full-stack developer updating an existing code based on new briefs.
+    Do not add any comments, just provide final, complete, update code.
+
     YOUR TASK:
-        1. Analyze current code thoroughly. Check the README.md file to see what was done previously.
+        1. Analyze current code thoroughly. Check the README.md file to see what was done in round 1.
         2. Identify required updates based on briefs
         3. Generate COMPLETE updated files with full content
         4. Verify all evaluation criteria will pass
-        5. Handle any attachments as mentioned.
     
     TASK ID: {task_id}
     ROUND: 2 (Update existing code)
@@ -615,7 +628,8 @@ def write_code_update_with_llm(task_data: dict, current_files: dict) -> dict:
     NEW REQUIREMENTS:
     {brief}
 
-    
+    {attachments}
+
     EVALUATION CRITERIA (ALL must pass):
     {checks_formatted}
 
@@ -639,31 +653,25 @@ def write_code_update_with_llm(task_data: dict, current_files: dict) -> dict:
 
 
 
-    RESPONSE FORMAT (valid JSON only):
-    {{
-        "files": {{
-            "index.html": "complete updated HTML content",
-            "README.md": "complete updated README content",
-            ".gitignore": "standard gitignore content",
-        }},
-        "description": "Concise description of changes made",
-    }}
+RESPONSE FORMAT (valid JSON only):
+{{
+    "files": {{
+        "index.html": "complete updated HTML content",
+        "README.md": "complete updated README content",
+        ".gitignore": "standard gitignore content",
+    }},
+    "description": "Concise description of changes made",
+}}
 
-    IMPORTANT: Return the raw JSON object only, with COMPLETE file contents. Do not use markdown code blocks or any wrapper text."""
+IMPORTANT: Return the raw JSON object only, with COMPLETE file contents. Do not use markdown code blocks or any wrapper text."""
 
-    content = build_multimodal_messages(prompt, task_data.get('attachments'))
 
     try:
-        print(f"📝 Prompt length: {len(prompt)} characters")
+        response_text = call_aipipe_llm(
+            prompt=prompt,
+            # model="anthropic/claude-sonnet-4-20250514"
+        )
         
-        # Call LLM API
-        print("🤖 Calling LLM...")
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": system_prompt} ]},
-            content
-        ]
-        response_text = call_aipipe_llm(messages)
-
         code_structure = extract_json_from_response(response_text)
         
         print(f"✅ CODE UPDATED SUCCESSFULLY")
@@ -680,67 +688,162 @@ def write_code_update_with_llm(task_data: dict, current_files: dict) -> dict:
 
 # -------------------------- PROCESS ATTACHMENTS -----------------------
 
+def process_attachments(attachments):
+    """Decodes data URIs from attachments and returns their formatted content."""
+    if not attachments:
+        return ""
+    
+    content_list = []
+    for attachment in attachments:
+        try:
+            filename = attachment['name']
+            file_extension = filename.split('.')[-1].lower()
+            
+            # Determine MIME type
+            mime_types = {
+                'csv': 'text/csv',
+                'txt': 'text/plain',
+                'json': 'application/json',
+                'pdf': 'application/pdf',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'svg': 'image/svg+xml',
+                'webp': 'image/webp'
+            }
+            mime_type = mime_types.get(file_extension, 'application/octet-stream')
+            
+            # Handle data URI format
+            if ',' in attachment['url']:
+                header, encoded = attachment['url'].split(',', 1)
+            else:
+                encoded = attachment['url']
+            
+            # For text-based files, decode and show content
+            if mime_type.startswith('text/') or file_extension in ['csv', 'txt', 'json']:
+                decoded_bytes = base64.b64decode(encoded)
+                decoded_content = decoded_bytes.decode('utf-8')
+                content_list.append(
+                    f"--- Attachment File: {filename} (MIME Type: {mime_type}) ---\n"
+                    f"IMPORTANT: This file contains the actual data you must use. "
+                    f"Do NOT generate dummy data. Read and parse this exact content:\n\n"
+                    f"{decoded_content}\n"
+                    f"--- End of {filename} ---"
+                )
+            # For images and binary files, provide data URI
+            else:
+                data_uri = f"data:{mime_type};base64,{encoded}"
+                content_list.append(
+                    f"--- Attachment File: {filename} (MIME Type: {mime_type}) ---\n"
+                    f"This is a binary file (image/document). Use it as a data URI in your HTML:\n"
+                    f"<img src=\"{data_uri}\" alt=\"{filename}\" />\n"
+                    f"Or in CSS: background-image: url('{data_uri}');\n"
+                    f"Full Data URI: {data_uri[:100]}... [truncated for readability]\n"
+                    f"--- End of {filename} ---"
+                )
+                
+        except Exception as e:
+            print(f"⚠️  Could not decode attachment {attachment.get('name', 'N/A')}: {e}")
+            content_list.append(
+                f"--- Attachment File: {attachment['name']} (DECODING FAILED) ---\n"
+                f"Error: {str(e)}"
+            )
+    
+    return "\n\n".join(content_list)
 
-def build_multimodal_messages(prompt_text: str, attachments: list, chunk_size: int = 5000):
-    """
-    Build a multimodal messages array for OpenRouter/OpenAI chat API.
 
-    Parameters:
-    - prompt_text: str → main instructions / task description
-    - attachments: list of dicts {"name": ..., "url": base64 string}
-    - chunk_size: int → max characters per chunk for large text files
-
-    Returns:
-    - messages: list of dicts ready for API
-    """
-
-    content = [{"type": "text", "text": prompt_text}]
+def process_attachments_2(attachments, chunk_size_kb=8):
+    """Process attachments with chunking for large text files and safe handling for binary types."""
+    if not attachments:
+        return ""
+        
+    content_list = []
+    max_chunk_bytes = chunk_size_kb * 1024
 
     for attachment in attachments:
-        filename = attachment.get("name", "unknown")
-        base64_data = attachment.get("url", "")
-        ext = filename.split(".")[-1].lower()
-
         try:
-            # --- Text files ---
-            if ext in ["txt", "csv", "json"]:
-                decoded_bytes = base64.b64decode(base64_data.split(",", 1)[-1])
-                text_content = decoded_bytes.decode("utf-8", errors="ignore")
-
-                # Chunk large text to avoid token overflow
-                if len(text_content) > chunk_size:
-                    chunks = [text_content[i:i+chunk_size] for i in range(0, len(text_content), chunk_size)]
-                    for i, chunk in enumerate(chunks, 1):
-                        content.append({
-                            "type": "text",
-                            "text": f"[CHUNK {i}/{len(chunks)} - {filename}]\n{chunk}"
-                        })
-                else:
-                    content.append({"type": "text", "text": f"[FILE: {filename}]\n{text_content}"})
-
-            # --- Image files ---
-            elif ext in ["png", "jpg", "jpeg", "gif", "webp"]:
-                data_uri = f"data:image/{ext};base64,{base64_data.split(',',1)[-1]}"
-                content.append({"type": "image_url", "image_url": data_uri})
-                print("Image Data ::::: \n", data_uri[:40])
-
-            # --- Binary / large unknown files ---
+            filename = attachment['name']
+            file_extension = filename.split('.')[-1].lower()
+            
+            mime_types = {
+                'csv': 'text/csv',
+                'txt': 'text/plain',
+                'json': 'application/json',
+                'pdf': 'application/pdf',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'svg': 'image/svg+xml',
+                'webp': 'image/webp'
+            }
+            mime_type = mime_types.get(file_extension, 'application/octet-stream')
+            
+            # Extract base64 string
+            if ',' in attachment['url']:
+                _, encoded = attachment['url'].split(',', 1)
             else:
-                size_kb = len(base64_data) * 3 / 4 / 1024
-                content.append({
-                    "type": "text",
-                    "text": f"[BINARY FILE: {filename} ~{size_kb:.1f} KB] - include externally if needed"
-                })
+                encoded = attachment['url']
+            
+            # --- TEXT FILE HANDLING ---
+            if mime_type.startswith('text/') or file_extension in ['csv', 'txt', 'json']:
+                decoded_bytes = base64.b64decode(encoded)
+                decoded_content = decoded_bytes.decode('utf-8', errors='ignore')
+                
+                # If file is small enough, include directly
+                if len(decoded_bytes) <= max_chunk_bytes:
+                    content_list.append(
+                        f"--- FILE: {filename} (Type: {mime_type}) ---\n"
+                        f"{decoded_content}\n"
+                        f"--- END OF {filename} ---"
+                    )
+                else:
+                    # Split into chunks
+                    chunks = textwrap.wrap(decoded_content, max_chunk_bytes, break_long_words=False)
+                    content_list.append(f"--- LARGE FILE: {filename} (split into {len(chunks)} chunks) ---")
+                    for i, chunk in enumerate(chunks, 1):
+                        content_list.append(
+                            f"[CHUNK {i}/{len(chunks)} - {filename}]\n{chunk}\n[END OF CHUNK {i}]"
+                        )
+                    content_list.append(f"--- END OF {filename} ---")
 
+            # --- IMAGE HANDLING ---
+            elif mime_type.startswith('image/'):
+                size_kb = len(encoded) * 3 / 4 / 1024
+                content_list.append(
+                    f"--- IMAGE FILE: {filename} ---\n"
+                    f"Type: {mime_type}\n"
+                    f"Size: ~{size_kb:.1f} KB\n"
+                    f"NOTE: Image content omitted to avoid token overload.\n"
+                    f"Provide description or ask user for relevant details if needed.\n"
+                    f"--- END OF {filename} ---"
+                )
+
+            # --- BINARY HANDLING (PDF, etc.) ---
+            else:
+                size_kb = len(encoded) * 3 / 4 / 1024
+                content_list.append(
+                    f"--- BINARY FILE: {filename} ---\n"
+                    f"Type: {mime_type}\n"
+                    f"Size: ~{size_kb:.1f} KB\n"
+                    f"NOTE: Binary content (e.g., PDF or other data) omitted for efficiency.\n"
+                    f"Consider processing this file separately with a parser before sending to LLM.\n"
+                    f"--- END OF {filename} ---"
+                )
+        
         except Exception as e:
-            # In case decoding fails, include metadata as text
-            content.append({
-                "type": "text",
-                "text": f"[ERROR PROCESSING FILE: {filename}] - {str(e)}"
-            })
+            print(f"⚠️ Could not process attachment {attachment.get('name', 'N/A')}: {e}")
+            content_list.append(
+                f"--- ERROR WITH FILE: {attachment.get('name', 'N/A')} ---\n"
+                f"Error: {str(e)}\n"
+                f"--- END ---"
+            )
 
-    # Return as a single user message
-    return {"role": "user", "content": content}
+    return "\n\n".join(content_list)
+
+
+
 
 
 # -------------------------- CODE STRUCTURE ---------------------------
@@ -754,7 +857,8 @@ def handle_query(data):
                 if data.get('round') ==1:
                     # test_api_connection()
                     # get attachments
-                    code_structure = write_code_with_llm(data)
+                    attachments = process_attachments(data.get("attachments"))
+                    code_structure = write_code_with_llm(data, attachments)
                     files = []
                     for filename, content in code_structure["files"].items():
                         files.append({
@@ -902,7 +1006,8 @@ def handle_round_2(data):
         
         # Step 2: Generate updated code with LLM
         print("🤖 Generating updated code with LLM...")
-        code_structure = write_code_update_with_llm(data, current_files)
+        attachments = process_attachments(data.get("attachments"))
+        code_structure = write_code_update_with_llm(data, current_files, attachments)
         
         # Step 3: Prepare files for push
         files = []

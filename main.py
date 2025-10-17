@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from help import verify_secret, handle_query
+from helper import verify_secret, handle_query
 
 app = FastAPI()
 
