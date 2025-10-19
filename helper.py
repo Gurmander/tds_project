@@ -795,8 +795,9 @@ def handle_query(data):
         print(f"❌ ERROR in round_1: {str(e)}")
         print(f"🧹 Cleaning up - attempting to delete repo: {repo_name}")
         
-        # Attempt cleanup
-        delete_github_repo(repo_name)
+        # Attempt cleanup if round 1
+        if data.get('round') ==1:
+            delete_github_repo(repo_name)
         
         # Re-raise the exception so caller knows it failed
         raise Exception(f"round_1 failed: {str(e)}")        
